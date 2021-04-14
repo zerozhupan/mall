@@ -1,4 +1,4 @@
-# supermall
+# ladymall
 
 ## Project setup
 ```
