@@ -1,6 +1,13 @@
 <template>
   <div id="home">
-    <nav-bar class="hone-nav"><div slot="center">购物天堂</div></nav-bar>
+    <nav-bar class="home-nav"><div slot="center">购物天堂</div></nav-bar>
+    <tab-control
+      :titles="['流行', '新款', '精选']"
+      :class="{ tabsticky: isSticky }"
+      @tabClick="tabClick"
+      ref="tabControl1"
+      v-show="isSticky"
+    ></tab-control>
     <scroll
       class="content"
       ref="scroll"
@@ -9,18 +16,22 @@
       :pull-up-load="true"
       @pullingUp="loadMore"
     >
-      <home-swiper :banners="banners"></home-swiper>
+      <home-swiper :banners="banners" @loadImage="loadImage"></home-swiper>
       <!-- 一定要:绑定属性，要不然传过去的就是字符串 -->
-      <recommend-view :recommends="recommends"></recommend-view>
+      <recommend-view
+        :recommends="recommends"
+        class="recommends"
+      ></recommend-view>
       <feature-view />
       <tab-control
         :titles="['流行', '新款', '精选']"
         class="tab-control"
         @tabClick="tabClick"
+        ref="tabControl2"
       ></tab-control>
       <goods-list :goods="showGoods" />
     </scroll>
-    <back-top v-show="isShowTop" @click.native="backClick"></back-top>
+    <back-top v-show="isShowTop" @click.native="backTopClick"></back-top>
   </div>
 </template>
 
@@ -35,6 +46,7 @@ import Scroll from "components/common/scroll/Scroll.vue";
 import BackTop from "components/content/backTop/BackTop.vue";
 
 import { getHomeMultidata, getHomeGoods } from "network/home";
+import { itemListenerMixin, bsckTopMixin } from "common/mixin.js";
 
 // import { Swiper, SwiperItem } from "components/common/swiper/index";
 
@@ -50,8 +62,9 @@ export default {
     TabControl,
     GoodsList,
     Scroll,
-    BackTop,
+    // BackTop,
   },
+  mixins: [itemListenerMixin, bsckTopMixin],
   data() {
     return {
       banners: [],
@@ -62,13 +75,24 @@ export default {
         sell: { page: 0, list: [] },
       },
       cunrrentType: "pop",
-      isShowTop: false,
+      // isShowTop: false,
+      tabOffsetTop: 0,
+      isSticky: false,
+      saveY: 0,
     };
   },
   computed: {
     showGoods() {
       return this.goods[this.cunrrentType].list;
     },
+  },
+  activated() {
+    this.$refs.scroll.scrollTo(0, this.saveY, 0);
+    this.$refs.scroll.refresh();
+  },
+  deactivated() {
+    this.saveY = this.$refs.scroll.scroll.y;
+    this.$bus.$off("itemImageLoad", this.imgLoadListener);
   },
   // 什么时候发送网络请求？在组件创建完成之后就马上发送。用到生命周期函数
   created() {
@@ -77,10 +101,42 @@ export default {
     this.getHomeGood("new");
     this.getHomeGood("sell");
   },
+  mounted() {
+    // 监听item中图片是否加载完成
+    // 就算这里没写延时时间，也还是有防抖动的效果。因为setTimeOut里面的回调函数是异步函数，放在最后执行的
+    // this.$bus.$on("itemImageLoad", () => {
+    //   // this.$refs.scroll.refresh();
+    //   // 这里报错的原因可能是：
+    //   // 1.图片加载太快，但是scroll组件还没挂载，此时没有scroll对象，自然也没有refresh()--->在scroll组件中做一个判断
+    //   // 2. 之前的监听图片是写在created里的，但这个是不合理的。因为很有可能拿不到this.$refs, 最好还是写在mounted里面
+    //   // this.$refs.scroll.refresh();
+    //   refresh();
+    // });
+  },
   methods: {
     /**
      * 事件监听相关方法
      */
+
+    // 防抖函数
+    /**
+     *降频函数
+     *这个 debounce 函数在给定的时间间隔内只允许你提供的回调函数执行一次，以此降低它的执行频率。
+     *调用:	debounce(function() {}, 250)
+     * @param {*} func回调函数
+     * @param {*} wait等待时间,推荐250
+     * @param {*} immediate
+     * @returns
+     */
+    debounce(func, wait) {
+      let timer = null;
+      return function (...args) {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          func.apply(this, args);
+        }, wait);
+      };
+    },
     tabClick(index) {
       switch (index) {
         case 0:
@@ -93,23 +149,29 @@ export default {
           this.cunrrentType = "sell";
           break;
       }
+      this.$refs.tabControl1.currentIndex = index;
+      this.$refs.tabControl2.currentIndex = index;
     },
     // 组件不能直接监听点击事件, @click.native="backClick"
-    backClick() {
-      // this.$refs.scroll拿到的是本页面的scroll组件（一定要绑定ref属性aaaa），后面的scroll是该组件的属性，再后面是该属性的方法，不过为了清晰，可以换一种写法（该方法需要在scroll组件中封装scrollTo方法）
-      // this.$refs.scroll.scroll.scrollTo(0, 0, 500);
-      this.$refs.scroll.scrollTo(0, 0, 500);
-    },
+    // backClick() {
+    //   // this.$refs.scroll拿到的是本页面的scroll组件（一定要绑定ref属性aaaa），后面的scroll是该组件的属性，再后面是该属性的方法，不过为了清晰，可以换一种写法（该方法需要在scroll组件中封装scrollTo方法）
+    //   // this.$refs.scroll.scroll.scrollTo(0, 0, 500);
+    //   this.$refs.scroll.scrollTo(0, 0, 500);
+    // },
 
     contentScroll(position) {
-      // console.log(-position.y > 1000);
+      // 1. 判断BackTop是否显示
       this.isShowTop = -position.y > 700;
+      // 2. 决定tabControl是否吸顶效果（position：fixed）
+      this.isSticky = -position.y >= this.tabOffsetTop;
     },
 
     loadMore() {
       this.getHomeGood(this.cunrrentType);
       this.$refs.scroll.finishPullUp();
-      this.$refs.scroll.scroll.refresh();
+    },
+    loadImage() {
+      this.tabOffsetTop = this.$refs.tabControl2.$el.offsetTop;
     },
     /**
      * 网络请求相关方法
@@ -137,24 +199,26 @@ export default {
 
 <style scoped>
 #home {
-  padding-top: 44px;
+  /* padding-top: 44px; */
   height: 100vh;
   position: relative;
 }
-.hone-nav {
+.home-nav {
   background-color: var(--color-tint);
   color: #fff;
   font-size: 18px;
-  position: fixed;
+  /* position: fixed;
   top: 0;
   left: 0;
   right: 0;
-  z-index: 9;
+  z-index: 9;*/
 }
 .tab-control {
   background-color: #fff;
-  position: sticky;
-  top: 44px;
+  /* position: sticky; */
+}
+.tabsticky {
+  position: relative;
   z-index: 9;
 }
 /* .content {

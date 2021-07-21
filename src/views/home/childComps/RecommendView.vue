@@ -29,6 +29,7 @@ export default {
   display: flex;
   padding: 15px 0;
   border-bottom: 8px solid #eee;
+  background-color: #fff;
 }
 .recommend-item {
   flex: 1;
